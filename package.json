@@ -1,0 +1,17 @@
+{
+  "name": "chat-duniya",
+  "version": "1.0.0",
+  "description": "A random text chat prototype with anonymous matching and safety controls",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

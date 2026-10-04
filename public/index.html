@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="description"
+        content="Chat Duniya — meet new people and have anonymous conversations online."
+    >
+
+    <title>Chat Duniya — Meet Someone New</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <header class="navbar">
+        <a href="/" class="brand" aria-label="Chat Duniya home">
+            <span class="brand-icon">C</span>
+            <span>Chat <span class="brand-accent">Duniya</span></span>
+        </a>
+
+        <div class="online-pill" aria-live="polite">
+            <span class="online-dot"></span>
+            <strong id="online-count">0</strong>
+            <span>online now</span>
+        </div>
+    </header>
+
+    <main class="page-container">
+        <section class="hero">
+            <div class="eyebrow">
+                <span class="eyebrow-dot"></span>
+                YOUR NEXT CONVERSATION STARTS HERE
+            </div>
+
+            <h1>Strangers today.<br><span>Stories tonight.</span></h1>
+
+            <p>
+                Meet someone new, share a thought, or just say hello.
+                Every conversation is a fresh beginning.
+            </p>
+
+            <div id="identity" class="identity-pill">
+                <span class="identity-icon">✦</span>
+                <span>Connecting...</span>
+            </div>
+        </section>
+
+        <section class="chat-card" aria-label="Anonymous chat">
+            <div class="chat-header">
+                <div class="chat-header-left">
+                    <div class="chat-icon">💬</div>
+
+                    <div>
+                        <h2>Stranger Chat</h2>
+                        <p id="chat-status">Ready when you are</p>
+                    </div>
+                </div>
+
+                <div class="privacy-tag">
+                    <span>●</span>
+                    Anonymous
+                </div>
+            </div>
+
+            <div
+                id="messages"
+                class="messages"
+                role="log"
+                aria-live="polite"
+                aria-relevant="additions"
+            >
+                <div class="welcome-panel">
+                    <div class="welcome-illustration">👋</div>
+
+                    <h3>A world of people awaits</h3>
+
+                    <p>
+                        Click <strong>Find Someone</strong> to start a
+                        conversation with a random person.
+                    </p>
+
+                    <div class="system-message">
+                        Be kind. Respect boundaries. Enjoy the conversation.
+                    </div>
+                </div>
+            </div>
+
+            <form id="message-form" class="message-form">
+                <label for="message-input" class="sr-only">
+                    Type your message
+                </label>
+
+                <input
+                    type="text"
+                    id="message-input"
+                    placeholder="Find someone to start chatting..."
+                    maxlength="1000"
+                    autocomplete="off"
+                    disabled
+                >
+
+                <button
+                    type="submit"
+                    id="send-button"
+                    class="send-button"
+                    aria-label="Send message"
+                    disabled
+                >
+                    Send <span aria-hidden="true">➤</span>
+                </button>
+            </form>
+
+            <div class="action-area">
+                <button
+                    type="button"
+                    id="find-button"
+                    class="button button-primary"
+                >
+                    <span aria-hidden="true">✦</span>
+                    Find Someone
+                </button>
+
+                <button
+                    type="button"
+                    id="next-button"
+                    class="button button-muted"
+                    disabled
+                >
+                    Next Person <span aria-hidden="true">→</span>
+                </button>
+
+                <button
+                    type="button"
+                    id="end-button"
+                    class="button button-muted"
+                    disabled
+                >
+                    End Chat
+                </button>
+
+                <button
+                    type="button"
+                    id="block-button"
+                    class="button button-danger"
+                    disabled
+                >
+                    Block
+                </button>
+
+                <button
+                    type="button"
+                    id="report-button"
+                    class="button button-danger"
+                    disabled
+                >
+                    Report
+                </button>
+            </div>
+
+            <div class="chat-footer">
+                <span>🔒 No account required</span>
+                <span>🌍 Meet people randomly</span>
+            </div>
+        </section>
+
+        <section class="feature-row" aria-label="Chat features">
+            <div class="feature">
+                <span class="feature-icon">🎭</span>
+                <span>Anonymous</span>
+            </div>
+
+            <div class="feature">
+                <span class="feature-icon">⚡</span>
+                <span>Instant matching</span>
+            </div>
+
+            <div class="feature">
+                <span class="feature-icon">💬</span>
+                <span>Real conversations</span>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <p>Made for conversations, powered by curiosity.</p>
+        <p>Chat Duniya © 2026</p>
+    </footer>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat Duniya — Moderation</title>
+<style>
+:root{--bg:#eef1f8;--ink:#14213d;--muted:#5d6785;--line:#d9deec;--danger:#c0392b;--teal:#0f8b8d}
+body{margin:0 auto;background:var(--bg);color:var(--ink);font-family:system-ui,sans-serif;padding:20px;max-width:900px}
+h1{margin:0 0 4px}.stats{color:var(--muted);margin-bottom:16px}
+.r{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.r.done{opacity:.6}
+.meta{color:var(--muted);font-size:.85rem;margin-bottom:8px;overflow-wrap:anywhere}
+.t{background:#f6f7fb;border-radius:8px;padding:8px;max-height:180px;overflow:auto;font-size:.9rem}
+.t div{margin:2px 0;overflow-wrap:anywhere}.t b{color:var(--teal)}.t b.bad{color:var(--danger)}
+button{font:inherit;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;margin:8px 8px 0 0;background:var(--ink);color:#fff}
+button.ban{background:var(--danger)}button.dis{background:transparent;color:var(--ink);border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<h1>Moderation</h1>
+<div class="stats" id="stats">Loading…</div>
+<div id="list"></div>
+<script>
+const list = document.getElementById("list");
+async function act(id, what) { await fetch(`/admin/api/reports/${id}/${what}`, { method: "POST" }); load(); }
+async function load() {
+  const { reports, stats } = await (await fetch("/admin/api/reports")).json();
+  document.getElementById("stats").textContent =
+    `${stats.open} open reports, ${stats.bannedClients} banned devices, ${stats.bannedIps} banned IPs`;
+  list.innerHTML = "";
+  if (!reports.length) list.textContent = "No reports yet.";
+  for (const r of reports) {
+    const card = document.createElement("div");
+    card.className = "r" + (r.status !== "open" ? " done" : "");
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `${new Date(r.at).toLocaleString()} | reason: ${r.reason} | status: ${r.status} | reported id: ${r.reportedId.slice(0, 8)}`;
+    const t = document.createElement("div");
+    t.className = "t";
+    for (const m of r.transcript) {
+      const line = document.createElement("div");
+      const who = document.createElement("b");
+      who.textContent = m.who === "reported" ? "Reported: " : "Reporter: ";
+      if (m.who === "reported") who.className = "bad";
+      line.append(who, document.createTextNode(m.text)); // text nodes only: safe from XSS
+      t.appendChild(line);
+    }
+    if (!r.transcript.length) t.textContent = "(no messages were exchanged)";
+    card.append(meta, t);
+    if (r.status === "open") {
+      const ban = Object.assign(document.createElement("button"), { textContent: "Ban user", className: "ban" });
+      const dis = Object.assign(document.createElement("button"), { textContent: "Dismiss", className: "dis" });
+      ban.onclick = () => act(r.id, "ban");
+      dis.onclick = () => act(r.id, "dismiss");
+      card.append(ban, dis);
+    }
+    list.appendChild(card);
+  }
+}
+load(); setInterval(load, 15000);
+</script>
+</body>
+</html>

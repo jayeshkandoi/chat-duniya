@@ -1,344 +1,184 @@
-const express = require("express");
+const path = require("path");
 const http = require("http");
+const crypto = require("crypto");
+const express = require("express");
 const { Server } = require("socket.io");
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
-app.use(express.static("public"));
-
-const waitingUsers = [];
-const partners = new Map();
-const users = new Map();
-const socketToUserId = new Map();
-const blockedUsers = new Map();
-const lastMessageAt = new Map();
-
-const adjectives = [
-    "Blue", "Happy", "Cool", "Brave", "Silent",
-    "Lucky", "Smart", "Swift", "Chill", "Sunny",
-    "Kind", "Cosmic", "Misty", "Golden", "Wild"
-];
-
-const animals = [
-    "Tiger", "Lion", "Eagle", "Wolf", "Panda",
-    "Fox", "Bear", "Falcon", "Rabbit", "Dolphin",
-    "Otter", "Koala", "Hawk", "Leopard", "Penguin"
-];
-
-function generateUsername() {
-    const adjective =
-        adjectives[Math.floor(Math.random() * adjectives.length)];
-
-    const animal =
-        animals[Math.floor(Math.random() * animals.length)];
-
-    const number = Math.floor(Math.random() * 90) + 10;
-
-    return `${adjective}${animal}${number}`;
-}
-
-function getOnlineMemberCount() {
-    // Count unique registered identities with active connections.
-    return new Set(socketToUserId.values()).size;
-}
-
-function broadcastOnlineCount() {
-    io.emit("online-count", getOnlineMemberCount());
-}
-
-function removeFromWaiting(socketId) {
-    let index;
-
-    while ((index = waitingUsers.indexOf(socketId)) !== -1) {
-        waitingUsers.splice(index, 1);
-    }
-}
-
-function isBlocked(userId1, userId2) {
-    return blockedUsers.get(userId1)?.has(userId2) || false;
-}
-
-function endChat(socketId, notifyPartner = true) {
-    const partnerId = partners.get(socketId);
-
-    removeFromWaiting(socketId);
-
-    if (!partnerId) {
-        return;
-    }
-
-    partners.delete(socketId);
-    partners.delete(partnerId);
-
-    const partnerSocket = io.sockets.sockets.get(partnerId);
-
-    if (notifyPartner && partnerSocket) {
-        partnerSocket.emit("chat-ended");
-    }
-}
-
-function findStranger(socket) {
-    const socketId = socket.id;
-    const userId = socketToUserId.get(socketId);
-
-    if (!userId) {
-        socket.emit("system-message", "Please wait while your identity loads.");
-        return;
-    }
-
-    if (partners.has(socketId)) {
-        socket.emit("system-message", "You are already chatting.");
-        return;
-    }
-
-    removeFromWaiting(socketId);
-
-    // Only inspect candidates already waiting at the start of this search.
-    // This prevents an endless loop if users cannot be matched.
-    const candidatesToCheck = waitingUsers.length;
-
-    for (let i = 0; i < candidatesToCheck; i++) {
-        const strangerId = waitingUsers.shift();
-
-        if (!strangerId || strangerId === socketId) {
-            continue;
-        }
-
-        const strangerSocket = io.sockets.sockets.get(strangerId);
-        const strangerUserId = socketToUserId.get(strangerId);
-
-        if (!strangerSocket || !strangerUserId) {
-            continue;
-        }
-
-        // A user must not be matched with another tab of themselves.
-        if (strangerUserId === userId) {
-            waitingUsers.push(strangerId);
-            continue;
-        }
-
-        // Do not match users who have blocked one another.
-        if (
-            isBlocked(userId, strangerUserId) ||
-            isBlocked(strangerUserId, userId)
-        ) {
-            waitingUsers.push(strangerId);
-            continue;
-        }
-
-        const myUser = users.get(userId);
-        const strangerUser = users.get(strangerUserId);
-
-        if (!myUser || !strangerUser) {
-            continue;
-        }
-
-        partners.set(socketId, strangerId);
-        partners.set(strangerId, socketId);
-
-        socket.emit("matched", {
-            username: strangerUser.username
-        });
-
-        strangerSocket.emit("matched", {
-            username: myUser.username
-        });
-
-        console.log(
-            `${myUser.username} matched with ${strangerUser.username}`
-        );
-
-        return;
-    }
-
-    waitingUsers.push(socketId);
-    socket.emit("waiting");
-}
-
-io.on("connection", (socket) => {
-    console.log("Socket connected:", socket.id);
-
-    // Send the latest count immediately, including to new connections.
-    socket.emit("online-count", getOnlineMemberCount());
-
-    socket.on("register-user", (data) => {
-        if (!data || typeof data.userId !== "string") {
-            return;
-        }
-
-        const userId = data.userId.trim();
-
-        // This is a prototype identifier, not verified authentication.
-        if (userId.length < 10 || userId.length > 100) {
-            socket.emit("system-message", "Unable to register your identity.");
-            return;
-        }
-
-        // Disconnecting and reconnecting with the same browser ID
-        // retains the username while this server process is running.
-        let user = users.get(userId);
-
-        if (!user) {
-            user = { username: generateUsername() };
-            users.set(userId, user);
-        }
-
-        socketToUserId.set(socket.id, userId);
-
-        socket.emit("your-identity", {
-            username: user.username
-        });
-
-        broadcastOnlineCount();
-
-        console.log(`${user.username} registered`);
-    });
-
-    socket.on("find-stranger", () => {
-        findStranger(socket);
-    });
-
-    socket.on("send-message", (message) => {
-        const partnerId = partners.get(socket.id);
-
-        if (!partnerId || typeof message !== "string") {
-            return;
-        }
-
-        message = message.trim();
-
-        if (!message) {
-            return;
-        }
-
-        if (message.length > 1000) {
-            socket.emit(
-                "system-message",
-                "Messages can contain up to 1000 characters."
-            );
-            return;
-        }
-
-        // Basic server-side message cooldown.
-        const now = Date.now();
-        const lastSent = lastMessageAt.get(socket.id) || 0;
-
-        if (now - lastSent < 500) {
-            socket.emit(
-                "system-message",
-                "Please slow down before sending another message."
-            );
-            return;
-        }
-
-        lastMessageAt.set(socket.id, now);
-
-        const partnerSocket = io.sockets.sockets.get(partnerId);
-
-        if (!partnerSocket) {
-            endChat(socket.id, false);
-            socket.emit("chat-ended");
-            return;
-        }
-
-        const senderUserId = socketToUserId.get(socket.id);
-        const sender = users.get(senderUserId);
-
-        partnerSocket.emit("receive-message", {
-            text: message,
-            username: sender?.username || "Stranger"
-        });
-    });
-
-    socket.on("next-stranger", () => {
-        endChat(socket.id, true);
-        findStranger(socket);
-    });
-
-    socket.on("end-chat", () => {
-        endChat(socket.id, true);
-    });
-
-    socket.on("block-user", () => {
-        const partnerId = partners.get(socket.id);
-
-        if (!partnerId) {
-            return;
-        }
-
-        const userId = socketToUserId.get(socket.id);
-        const strangerUserId = socketToUserId.get(partnerId);
-
-        if (!userId || !strangerUserId) {
-            return;
-        }
-
-        if (!blockedUsers.has(userId)) {
-            blockedUsers.set(userId, new Set());
-        }
-
-        blockedUsers.get(userId).add(strangerUserId);
-
-        socket.emit("user-blocked");
-
-        console.log(
-            `${users.get(userId)?.username} blocked ` +
-            `${users.get(strangerUserId)?.username}`
-        );
-
-        endChat(socket.id, true);
-    });
-
-    socket.on("report-user", (reason) => {
-        const partnerId = partners.get(socket.id);
-
-        if (!partnerId) {
-            return;
-        }
-
-        if (typeof reason !== "string") {
-            reason = "";
-        }
-
-        reason = reason.trim().slice(0, 200);
-
-        const reporterId = socketToUserId.get(socket.id);
-        const reportedId = socketToUserId.get(partnerId);
-
-        console.log("USER REPORT:", {
-            reporter: users.get(reporterId)?.username || "Unknown",
-            reported: users.get(reportedId)?.username || "Unknown",
-            reason: reason || "No reason provided",
-            time: new Date().toISOString()
-        });
-
-        socket.emit("report-submitted");
-
-        endChat(socket.id, true);
-    });
-
-    socket.on("disconnect", () => {
-        const userId = socketToUserId.get(socket.id);
-        const user = users.get(userId);
-
-        removeFromWaiting(socket.id);
-        endChat(socket.id, true);
-
-        socketToUserId.delete(socket.id);
-        lastMessageAt.delete(socket.id);
-
-        if (user) {
-            console.log(`${user.username} disconnected`);
-        }
-
-        broadcastOnlineCount();
-    });
-});
+const { Matcher, normalizeInterests } = require("./matcher");
+const store = require("./store");
 
 const PORT = process.env.PORT || 3000;
+const ADMIN_USER = process.env.ADMIN_USER || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD; // REQUIRED to enable /admin
 
-server.listen(PORT, () => {
-    console.log(`Chat Duniya running at http://localhost:${PORT}`);
+const MAX_MSG_LEN = 500;
+const RATE_LIMIT = { count: 5, perMs: 3000 };   // 5 messages / 3 seconds
+const MAX_CONN_PER_IP = 3;
+const TRANSCRIPT_KEEP = 20;
+
+const app = express();
+app.set("trust proxy", 1); // Render sits behind a proxy
+const server = http.createServer(app);
+const io = new Server(server, { maxHttpBufferSize: 2e3 });
+
+/* ---------- Admin dashboard (HTTP Basic Auth) ---------- */
+const safeEq = (a, b) => {
+  const A = Buffer.from(String(a)), B = Buffer.from(String(b));
+  return A.length === B.length && crypto.timingSafeEqual(A, B);
+};
+function adminAuth(req, res, next) {
+  if (!ADMIN_PASSWORD) return res.status(503).send("Set ADMIN_PASSWORD env var to enable admin.");
+  const [u, p] = Buffer.from((req.headers.authorization || "").slice(6), "base64").toString().split(/:(.*)/s);
+  if (u && safeEq(u, ADMIN_USER) && safeEq(p || "", ADMIN_PASSWORD)) return next();
+  res.set("WWW-Authenticate", 'Basic realm="Chat Duniya admin"').status(401).send("Auth required");
+}
+app.use("/admin", adminAuth, express.json({ limit: "10kb" }));
+app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "admin", "admin.html")));
+app.get("/admin/api/reports", (_req, res) => res.json({ reports: store.listReports(), stats: store.stats() }));
+app.post("/admin/api/reports/:id/dismiss", (req, res) => res.json({ ok: store.setStatus(req.params.id, "dismissed") }));
+app.post("/admin/api/reports/:id/ban", (req, res) => {
+  const r = store.listReports().find((x) => x.id === req.params.id);
+  if (!r) return res.status(404).json({ ok: false });
+  store.ban(r.reportedId, r.reportedIp);
+  store.setStatus(r.id, "banned");
+  for (const u of users.values()) {
+    if (u.clientId === r.reportedId || u.ip === r.reportedIp) u.socket.disconnect(true);
+  }
+  res.json({ ok: true });
 });
+
+app.use(express.static(path.join(__dirname, "public")));
+app.get("/healthz", (_req, res) => res.send("ok")); // use as Render health check
+
+/* ---------- Real-time chat ---------- */
+const matcher = new Matcher({ fallbackMs: 10000 });
+const users = new Map(); // socket.id -> user
+const ipCount = new Map();
+
+const BAD_WORDS = /\b(fuck|shit|bitch|asshole|bastard)\b/gi; // extend as needed
+const clean = (t) => String(t ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, MAX_MSG_LEN).replace(BAD_WORDS, (w) => "*".repeat(w.length));
+
+const clientIp = (socket) =>
+  (socket.handshake.headers["x-forwarded-for"] || socket.handshake.address || "").split(",")[0].trim();
+
+const broadcastOnline = () => io.emit("online", users.size);
+
+function allowed(user) {
+  const now = Date.now();
+  user.stamps = user.stamps.filter((t) => now - t < RATE_LIMIT.perMs);
+  if (user.stamps.length >= RATE_LIMIT.count) return false;
+  user.stamps.push(now);
+  return true;
+}
+
+function startChat({ a, b, shared }) {
+  const conv = { msgs: [] };
+  const ua = users.get(a.id), ub = users.get(b.id);
+  if (!ua || !ub) { // someone vanished between match and start: requeue the other
+    for (const u of [ua, ub]) if (u) enqueue(u);
+    return;
+  }
+  ua.partner = ub; ub.partner = ua; ua.conv = ub.conv = conv;
+  ua.socket.emit("matched", { shared });
+  ub.socket.emit("matched", { shared });
+}
+
+function enqueue(user) {
+  user.partner = null; user.conv = null;
+  user.socket.emit("searching");
+  const m = matcher.add({
+    id: user.socket.id, clientId: user.clientId,
+    interests: user.interests, blocked: user.blocked,
+  });
+  if (m) startChat(m);
+}
+
+function leave(user, { notify = true } = {}) {
+  matcher.remove(user.socket.id);
+  const p = user.partner;
+  if (p) {
+    p.partner = null;
+    if (notify) p.socket.emit("partner_left");
+  }
+  user.partner = null; user.conv = null;
+}
+
+setInterval(() => matcher.tick().forEach(startChat), 2000);
+
+io.use((socket, next) => {
+  const clientId = String(socket.handshake.auth?.clientId || "").slice(0, 64);
+  const ip = clientIp(socket);
+  if (!/^[0-9a-f-]{16,64}$/i.test(clientId)) return next(new Error("bad_client"));
+  if (store.isBanned(clientId, ip)) return next(new Error("banned"));
+  if ((ipCount.get(ip) || 0) >= MAX_CONN_PER_IP) return next(new Error("too_many"));
+  socket.data = { clientId, ip };
+  next();
+});
+
+io.on("connection", (socket) => {
+  const { clientId, ip } = socket.data;
+  ipCount.set(ip, (ipCount.get(ip) || 0) + 1);
+  const user = { socket, clientId, ip, interests: [], blocked: new Set(), partner: null, conv: null, stamps: [] };
+  users.set(socket.id, user);
+  broadcastOnline();
+
+  socket.on("find", (data) => {
+    if (user.partner || matcher.has(socket.id)) return;
+    user.interests = normalizeInterests(data?.interests);
+    enqueue(user);
+  });
+
+  socket.on("next", () => { leave(user); enqueue(user); });
+  socket.on("end", () => { leave(user); socket.emit("ended"); });
+
+  socket.on("message", (data, ack) => {
+    const reply = typeof ack === "function" ? ack : () => {};
+    if (!user.partner) return reply({ ok: false, error: "no_partner" });
+    if (!allowed(user)) return reply({ ok: false, error: "slow_down" });
+    const text = clean(data?.text);
+    const id = String(data?.id || "").slice(0, 40);
+    if (!text || !id) return reply({ ok: false, error: "empty" });
+    user.conv.msgs.push({ from: clientId, text, at: Date.now() });
+    if (user.conv.msgs.length > TRANSCRIPT_KEEP) user.conv.msgs.shift();
+    user.partner.socket.emit("message", { id, text });
+    reply({ ok: true, text }); // "sent" state (server received it)
+  });
+
+  // partner's client confirms it showed the message -> "delivered" state
+  socket.on("delivered", ({ id } = {}) => {
+    if (user.partner) user.partner.socket.emit("delivered", { id: String(id).slice(0, 40) });
+  });
+
+  socket.on("typing", (isTyping) => {
+    if (user.partner) user.partner.socket.emit("typing", !!isTyping);
+  });
+
+  socket.on("block", () => {
+    if (!user.partner) return;
+    user.blocked.add(user.partner.clientId);
+    socket.emit("blocked");
+    leave(user);
+  });
+
+  socket.on("report", (data) => {
+    const p = user.partner;
+    if (!p) return;
+    const { autoBanned } = store.addReport({
+      reporterId: clientId, reportedId: p.clientId, reportedIp: p.ip,
+      reason: data?.reason,
+      transcript: user.conv.msgs.map((m) => ({ who: m.from === clientId ? "reporter" : "reported", text: m.text, at: m.at })),
+    });
+    user.blocked.add(p.clientId);
+    socket.emit("reported");
+    if (autoBanned) { p.socket.emit("banned"); p.socket.disconnect(true); }
+    else leave(user);
+  });
+
+  socket.on("disconnect", () => {
+    leave(user);
+    users.delete(socket.id);
+    ipCount.set(ip, Math.max(0, (ipCount.get(ip) || 1) - 1));
+    broadcastOnline();
+  });
+});
+
+server.listen(PORT, () => console.log(`Chat Duniya running on :${PORT}`));
